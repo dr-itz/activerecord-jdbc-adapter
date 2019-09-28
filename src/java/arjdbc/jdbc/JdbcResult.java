@@ -3,13 +3,9 @@ package arjdbc.jdbc;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
+import java.sql.Types;
 
-import org.jruby.Ruby;
-import org.jruby.RubyArray;
-import org.jruby.RubyClass;
-import org.jruby.RubyHash;
-import org.jruby.RubyObject;
-import org.jruby.RubyString;
+import org.jruby.*;
 import org.jruby.runtime.Block;
 import org.jruby.runtime.ThreadContext;
 import org.jruby.runtime.builtin.IRubyObject;
@@ -27,12 +23,17 @@ public class JdbcResult extends RubyObject {
     protected final int[] columnTypes;
     protected RubyString[] columnNames;
     protected final RubyJdbcConnection connection;
+    protected IRubyObject columnTypeMap;
+    protected boolean arResult;
+    protected boolean hasBinary;
 
-    protected JdbcResult(ThreadContext context, RubyClass clazz, RubyJdbcConnection connection, ResultSet resultSet) throws SQLException {
+    protected JdbcResult(ThreadContext context, RubyClass clazz, RubyJdbcConnection connection, ResultSet resultSet, boolean arResult) throws SQLException {
         super(context.runtime, clazz);
 
         values = context.runtime.newArray();
         this.connection = connection;
+        this.arResult = arResult;
+        setupColumnTypeMap(context, arResult);
 
         final ResultSetMetaData resultMetaData = resultSet.getMetaData();
         final int columnCount = resultMetaData.getColumnCount();
@@ -43,14 +44,15 @@ public class JdbcResult extends RubyObject {
         processResultSet(context, resultSet);
     }
 
-    /**
-     * Builds a type map for creating the AR::Result, most adapters don't need it
-     * @param context which thread this is running on.
-     * @return RubyNil
-     * @throws SQLException postgres result can throw an exception
-     */
-    protected IRubyObject columnTypeMap(ThreadContext context) throws SQLException {
-        return context.nil;
+    protected void setupColumnTypeMap(ThreadContext context, boolean arResult) {
+        columnTypeMap = context.nil;
+    }
+
+    protected void addToColumnTypeMap(ThreadContext context, ResultSetMetaData resultSetMetaData, int col) throws SQLException {
+    }
+
+    protected boolean isBinaryType(final int type) {
+        return type == Types.BLOB || type == Types.BINARY || type == Types.VARBINARY || type == Types.LONGVARBINARY;
     }
 
     /**
@@ -64,8 +66,11 @@ public class JdbcResult extends RubyObject {
         for (int i = 1; i <= columnCount; i++) { // metadata is one-based
             // This appears to not be used by Postgres, MySQL, or SQLite so leaving it off for now
             //name = caseConvertIdentifierForRails(connection, name);
-            columnNames[i - 1] = RubyJdbcConnection.STRING_CACHE.get(context, resultMetaData.getColumnLabel(i));
-            columnTypes[i - 1] = resultMetaData.getColumnType(i);
+            int colIndex = i - 1;
+            columnNames[colIndex] = RubyJdbcConnection.STRING_CACHE.get(context, resultMetaData.getColumnLabel(i));
+            columnTypes[colIndex] = resultMetaData.getColumnType(i);
+            if (!hasBinary && isBinaryType(columnTypes[colIndex])) hasBinary = true;
+            addToColumnTypeMap(context, resultMetaData, i);
         }
     }
 
@@ -94,6 +99,10 @@ public class JdbcResult extends RubyObject {
         }
     }
 
+    private RubyClass getBinaryDataClass(final ThreadContext context) {
+        return ((RubyModule) context.runtime.getModule("ActiveModel").getConstantAt("Type")).getClass("Binary").getClass("Data");
+    }
+
     /**
      * Does the heavy lifting of turning the JDBC objects into Ruby objects
      * @param context current thread context
@@ -103,12 +112,22 @@ public class JdbcResult extends RubyObject {
     private void processResultSet(final ThreadContext context, final ResultSet resultSet) throws SQLException {
         Ruby runtime = context.runtime;
         int columnCount = columnNames.length;
+        RubyClass BinaryDataClass = hasBinary && arResult ? getBinaryDataClass(context) : null;
 
         while (resultSet.next()) {
             final IRubyObject[] row = new IRubyObject[columnCount];
 
             for (int i = 0; i < columnCount; i++) {
-                row[i] = connection.jdbcToRuby(context, runtime, i + 1, columnTypes[i], resultSet); // Result Set is 1 based
+                int colType = columnTypes[i];
+
+                IRubyObject val = connection.jdbcToRuby(context, runtime, i + 1, colType, resultSet); // Result Set is 1 based
+
+                // wrapp binary data for AR when necessary
+                if (BinaryDataClass != null && isBinaryType(colType) && val != context.nil) {
+                    val = BinaryDataClass.newInstance(context, val, Block.NULL_BLOCK);
+                }
+
+                row[i] = val;
             }
 
             values.append(RubyArray.newArrayNoCopy(context.runtime, row));
@@ -125,6 +144,6 @@ public class JdbcResult extends RubyObject {
         final RubyClass Result = RubyJdbcConnection.getResult(context.runtime);
         // FIXME: Is this broken?  no copy of an array AR::Result can modify?  or should it be frozen?
         final RubyArray rubyColumnNames = RubyArray.newArrayNoCopy(context.runtime, getColumnNames());
-        return Result.newInstance(context, rubyColumnNames, values, columnTypeMap(context), Block.NULL_BLOCK);
+        return Result.newInstance(context, rubyColumnNames, values, columnTypeMap, Block.NULL_BLOCK);
     }
 }

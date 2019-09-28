@@ -30,9 +30,6 @@ import org.jruby.runtime.builtin.IRubyObject;
 public class PostgreSQLResult extends JdbcResult {
     private RubyArray fields = null; // lazily created if PG fields method is called.
 
-    // These are needed when generating an AR::Result
-    private final ResultSetMetaData resultSetMetaData;
-
     /********* JRuby compat methods ***********/
 
     static RubyClass createPostgreSQLResultClass(Ruby runtime, RubyClass postgreSQLConnection) {
@@ -51,57 +48,47 @@ public class PostgreSQLResult extends JdbcResult {
      * @throws SQLException throws!
      */
     static PostgreSQLResult newResult(ThreadContext context,  RubyClass clazz, PostgreSQLRubyJdbcConnection connection,
-                                      ResultSet resultSet) throws SQLException {
-        return new PostgreSQLResult(context, clazz, connection, resultSet);
+                                      ResultSet resultSet, boolean arResult) throws SQLException {
+        return new PostgreSQLResult(context, clazz, connection, resultSet, arResult);
     }
 
     /********* End JRuby compat methods ***********/
 
     private PostgreSQLResult(ThreadContext context, RubyClass clazz, RubyJdbcConnection connection,
-                             ResultSet resultSet) throws SQLException {
-        super(context, clazz, connection, resultSet);
-
-        resultSetMetaData = resultSet.getMetaData();
+                             ResultSet resultSet, boolean arResult) throws SQLException {
+        super(context, clazz, connection, resultSet, arResult);
     }
 
-    /**
-     * Generates a type map to be given to the AR::Result object
-     * @param context current thread context
-     * @return RubyHash RubyString - column name, Type::Value - type object)
-     * @throws SQLException if it fails to get the field
-     */
-    @Override
-    protected IRubyObject columnTypeMap(final ThreadContext context) throws SQLException {
-        Ruby runtime = context.runtime;
-        RubyHash types = RubyHash.newHash(runtime);
-        int columnCount = columnNames.length;
+    protected void setupColumnTypeMap(ThreadContext context, boolean arResult) {
+        this.columnTypeMap = arResult ? RubyHash.newHash(context.runtime) : context.nil;
+    }
 
-        IRubyObject adapter = connection.adapter(context);
-        for (int i = 0; i < columnCount; i++) {
-            int col = i + 1;
-            String typeName = resultSetMetaData.getColumnTypeName(col);
+    protected void addToColumnTypeMap(ThreadContext context, ResultSetMetaData resultSetMetaData, int col) throws SQLException {
+        if (!arResult) return;
 
-            int mod = 0;
-            if  ("numeric".equals(typeName)) {
-                // this field is only relevant for "numeric" type in AR
-                // AR checks (fmod - 4 & 0xffff).zero?
-                // pgjdbc:
-                //  - for typmod == -1, getScale() and getPrecision() return 0
-                //  - for typmod != -1, getScale() returns "(typmod - 4) & 0xFFFF;"
-                mod = resultSetMetaData.getScale(col);
-                mod = mod == 0 && resultSetMetaData.getPrecision(col) == 0 ? -1 : mod + 4;
-            }
+        RubyHash types = (RubyHash) columnTypeMap;
 
-            final RubyString name = columnNames[i];
-            final IRubyObject type = Helpers.invoke(context, adapter, "get_oid_type",
-                    runtime.newString(typeName),
-                    runtime.newFixnum(mod),
-                    name);
+        String typeName = resultSetMetaData.getColumnTypeName(col);
 
-            if (!type.isNil()) types.fastASet(name, type);
+        int mod = 0;
+        if  ("numeric".equals(typeName)) {
+            // this field is only relevant for "numeric" type in AR
+            // AR checks (fmod - 4 & 0xffff).zero?
+            // pgjdbc:
+            //  - for typmod == -1, getScale() and getPrecision() return 0
+            //  - for typmod != -1, getScale() returns "(typmod - 4) & 0xFFFF;"
+            mod = resultSetMetaData.getScale(col);
+            mod = mod == 0 && resultSetMetaData.getPrecision(col) == 0 ? -1 : mod + 4;
         }
 
-        return types;
+        final IRubyObject adapter = connection.adapter(context);
+        final RubyString name = columnNames[col - 1];
+        final IRubyObject type = Helpers.invoke(context, adapter, "get_oid_type",
+                context.runtime.newString(typeName),
+                context.runtime.newFixnum(mod),
+                name);
+
+        if (!type.isNil()) types.fastASet(name, type);
     }
 
     /**
@@ -129,13 +116,7 @@ public class PostgreSQLResult extends JdbcResult {
         }
     }
 
-    private RubyClass getBinaryDataClass(final ThreadContext context) {
-        return ((RubyModule) context.runtime.getModule("ActiveModel").getConstantAt("Type")).getClass("Binary").getClass("Data");
-    }
 
-    private boolean isBinaryType(final int type) {
-        return type == Types.BLOB || type == Types.BINARY || type == Types.VARBINARY || type == Types.LONGVARBINARY;
-    }
 
     /**
      * Gives the number of rows to be returned.
@@ -146,42 +127,6 @@ public class PostgreSQLResult extends JdbcResult {
     @PG @JRubyMethod(name = {"length", "ntuples", "num_tuples"})
     public IRubyObject length(final ThreadContext context) {
         return values.length();
-    }
-
-    /**
-     * Creates an <code>ActiveRecord::Result</code> with the data from this result.
-     * Overriding the base method so we can modify binary data columns first to mark them
-     * as already unencoded
-     * @param context current thread context
-     * @return ActiveRecord::Result object with the data from this result set
-     * @throws SQLException can be caused by postgres generating its type map
-     */
-    @Override @SuppressWarnings("unchecked")
-    public IRubyObject toARResult(final ThreadContext context) throws SQLException {
-        RubyClass BinaryDataClass = null;
-        int rowCount = 0;
-
-        // This is destructive, but since this is typically the final
-        // use of the rows I'm going to leave it this way unless it becomes an issue
-        for (int columnIndex = 0; columnIndex < columnTypes.length; columnIndex++) {
-            if (isBinaryType(columnTypes[columnIndex])) {
-                // Convert the values in this column to ActiveModel::Type::Binary::Data instances
-                // so AR knows it has already been unescaped
-                if (BinaryDataClass == null) {
-                    BinaryDataClass = getBinaryDataClass(context);
-                    rowCount = values.getLength();
-                }
-                for (int rowIndex = 0; rowIndex < rowCount; rowIndex++) {
-                    RubyArray row = (RubyArray) values.eltInternal(rowIndex);
-                    IRubyObject value = row.eltInternal(columnIndex);
-                    if (value != context.nil) {
-                        row.eltInternalSet(columnIndex, BinaryDataClass.newInstance(context, value, Block.NULL_BLOCK));
-                    }
-                }
-            }
-        }
-
-        return super.toARResult(context);
     }
 
     /**
