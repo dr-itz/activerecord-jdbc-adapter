@@ -104,7 +104,8 @@ public abstract class StringHelper {
             p = nonWhitespaceIndex(bytes, p + 1);
         }
 
-        for ( int i = 0; i < bytes.getRealSize() && i < start.length; i++ ) {
+        final int size = bytes.getRealSize();
+        for ( int i = 0; i < size && i < start.length; i++ ) {
             if ( Character.toLowerCase(stringBytes[p + i]) != start[i] ) return false;
         }
         return true;

@@ -56,10 +56,9 @@ public class SQLite3Module {
             final IRubyObject self, 
             final IRubyObject string) { // string.gsub("'", "''") :
         final char single = '\'';
-        final RubyString quoted = quoteCharWith(
+        return quoteCharWith(
             context, (RubyString) string, single, single
         );
-        return quoted;
     }
 
     @JRubyMethod(name = "quote_column_name", required = 1)

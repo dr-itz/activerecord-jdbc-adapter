@@ -967,12 +967,12 @@ public class RubyJdbcConnection extends RubyObject {
                     binds = null;
                 } else {                              // (sql, binds)
                     maxRows = 0;
-                    binds = (RubyArray) TypeConverter.checkArrayType(args[1]);
+                    binds = (RubyArray) TypeConverter.checkArrayType(context, args[1]);
                 }
                 break;
             case 3:                                   // (sql, max_rows, binds)
                 maxRows = RubyNumeric.fix2int(args[1]);
-                binds = (RubyArray) TypeConverter.checkArrayType(args[2]);
+                binds = (RubyArray) TypeConverter.checkArrayType(context, args[2]);
                 break;
             default:                                  // (sql) 1-arg
                 maxRows = 0;
@@ -2347,7 +2347,8 @@ public class RubyJdbcConnection extends RubyObject {
         final Connection connection, final PreparedStatement statement,
         final RubyArray binds) throws SQLException {
 
-        for ( int i = 0; i < binds.getLength(); i++ ) {
+        int len = binds.getLength();
+        for ( int i = 0; i < len; i++ ) {
             setStatementParameter(context, connection, statement, i + 1, binds.eltInternal(i));
         }
     }
@@ -3456,8 +3457,7 @@ public class RubyJdbcConnection extends RubyObject {
 
         final RubyHash row = new RubyHash(runtime, columns.length);
 
-        for ( int i = 0; i < columns.length; i++ ) {
-            final ColumnData column = columns[i];
+        for (final ColumnData column : columns) {
             // NOTE: we know keys are always String so maybe we could take it even further ?!
             row.fastASetCheckString(runtime, column.getName(context),
                 connection.jdbcToRuby(context, runtime, column.index, column.type, resultSet)
@@ -3619,7 +3619,7 @@ public class RubyJdbcConnection extends RubyObject {
 
         @Override
         public String toString() {
-            return "'" + label + "'i" + index + "t" + type + "";
+            return "'" + label + "'i" + index + "t" + type;
         }
 
     }

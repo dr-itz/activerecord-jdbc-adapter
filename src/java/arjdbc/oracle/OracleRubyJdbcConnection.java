@@ -39,15 +39,12 @@ import java.io.IOException;
 import java.io.Reader;
 import java.sql.CallableStatement;
 import java.sql.Connection;
-import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.PreparedStatement;
 import java.sql.ResultSetMetaData;
 import java.sql.Statement;
 import java.sql.Types;
-import java.util.Collections;
-import java.util.List;
 import java.util.Locale;
 import java.util.regex.Pattern;
 

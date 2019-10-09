@@ -618,7 +618,7 @@ public abstract class DateTimeUtils {
         // maximum value is 60 (seconds)
         NUMBERS = new char[60][];
         for (int i = 0; i < NUMBERS.length; i++) {
-            NUMBERS[i] = ((i < 10 ? "0" : "") + Integer.toString(i)).toCharArray();
+            NUMBERS[i] = ((i < 10 ? "0" : "") + i).toCharArray();
         }
     }
 

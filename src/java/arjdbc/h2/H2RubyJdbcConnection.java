@@ -26,7 +26,6 @@
 package arjdbc.h2;
 
 import java.sql.Connection;
-import java.sql.SQLException;
 
 import org.jruby.Ruby;
 import org.jruby.RubyClass;

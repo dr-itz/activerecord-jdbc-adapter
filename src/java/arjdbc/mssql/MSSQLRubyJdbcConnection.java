@@ -31,7 +31,6 @@ import arjdbc.jdbc.RubyJdbcConnection;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.sql.Connection;
-import java.sql.DatabaseMetaData;
 import java.sql.Date;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -52,7 +51,6 @@ import org.jruby.Ruby;
 import org.jruby.RubyArray;
 import org.jruby.RubyBoolean;
 import org.jruby.RubyClass;
-import org.jruby.RubyString;
 import org.jruby.RubyTime;
 import org.jruby.anno.JRubyMethod;
 import org.jruby.runtime.ObjectAllocator;
@@ -378,7 +376,7 @@ public class MSSQLRubyJdbcConnection extends RubyJdbcConnection {
      * Converts a JDBC time to a Ruby time. We use timestamp because java.sql.Time doesn't support sub-millisecond values
      * @param context current thread context
      * @param resultSet the jdbc result set to pull the value from
-     * @param index the index of the column to convert
+     * @param column the index of the column to convert
      * @return RubyNil if NULL or RubyTime if there is a value
      * @throws SQLException if it fails to retrieve the value from the result set
      */
