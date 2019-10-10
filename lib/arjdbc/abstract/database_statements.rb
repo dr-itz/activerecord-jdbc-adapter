@@ -42,9 +42,7 @@ module ArJdbc
           log(sql, name) { @connection.execute_query(sql) }
         else
           log(sql, name, binds) do
-            # this is different from normal AR that always caches
-            cached_statement = fetch_cached_statement(sql) if prepare && @jdbc_statement_cache_enabled
-            @connection.execute_prepared_query(sql, binds, cached_statement)
+            @connection.execute_prepared_query(sql, binds, prepare ? sql_cache_schema : false)
           end
         end
       end

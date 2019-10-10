@@ -53,6 +53,7 @@ class VersionTest < Test::Unit::TestCase
     connection = mock('connection')
     connection.stubs(:jndi?)
     connection.stubs(:configure_connection)
+    connection.stubs(:setup_statement_cache)
     connection.expects(:database_product).returns full_version ? version.to_s : "PostgreSQL #{version}"
     ActiveRecord::ConnectionAdapters::PostgreSQLAdapter.any_instance.stubs(:initialize_type_map)
     pg_connection = ActiveRecord::ConnectionAdapters::PostgreSQLAdapter.new(connection, nil, {})

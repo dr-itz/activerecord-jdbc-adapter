@@ -62,7 +62,7 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.TimeZone;
 
-import arjdbc.util.StringHelper;
+import arjdbc.util.*;
 import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
 import org.jruby.Ruby;
@@ -101,10 +101,6 @@ import org.jruby.util.ByteList;
 import org.jruby.util.SafePropertyAccessor;
 import org.jruby.util.TypeConverter;
 
-import arjdbc.util.DateTimeUtils;
-import arjdbc.util.ObjectSupport;
-import arjdbc.util.StringCache;
-
 import static arjdbc.jdbc.DataSourceConnectionFactory.*;
 import static arjdbc.util.StringHelper.*;
 import static org.jruby.RubyTime.getLocalTimeZone;
@@ -124,6 +120,7 @@ public class RubyJdbcConnection extends RubyObject {
     private IRubyObject config;
     private IRubyObject adapter; // the AbstractAdapter instance we belong to
     private volatile boolean connected = true;
+    private StatementCache statementCache;
 
     private boolean lazy = false; // final once set on initialize
     private boolean jndi; // final once set on initialize
@@ -1061,20 +1058,16 @@ public class RubyJdbcConnection extends RubyObject {
         });
     }
 
-    /**
-     * Prepares a query, returns a wrapped PreparedStatement. This takes care of exception wrapping
-     * @param context which context this method is executing on.
-     * @param sql the query to prepare-
-     * @return a Ruby <code>PreparedStatement</code>
-     */
     @JRubyMethod(required = 1)
-    public IRubyObject prepare_statement(final ThreadContext context, final IRubyObject sql) {
-        return withConnection(context, connection -> {
-            final String query = sql.convertToString().getUnicodeValue();
-            PreparedStatement statement = connection.prepareStatement(query);
-            if (fetchSize != 0) statement.setFetchSize(fetchSize);
-            return JavaUtil.convertJavaToRuby(context.runtime, statement);
-        });
+    public IRubyObject setup_statement_cache(ThreadContext context, IRubyObject limit) {
+        int cacheLimit = limit == context.nil ? 0 : RubyNumeric.fix2int(limit);
+        statementCache = new StatementCache(cacheLimit);
+        return JavaUtil.convertJavaToRuby(context.runtime, statementCache);
+    }
+
+    @JRubyMethod
+    public void clear_statement_cache() {
+        statementCache.clear();
     }
 
     // Called from exec_query in abstract/database_statements
@@ -1089,25 +1082,32 @@ public class RubyJdbcConnection extends RubyObject {
      * @param context which context this method is executing on.
      * @param sql the query to execute.
      * @param binds an array of values to be set as parameters
-     * @param cachedStatement a wrapped <code>PreparedStatement</code> to use instead of creating a new <code>Statement</code>
+     * @param cacheSchema additional key for caching
      * @return a Ruby <code>ActiveRecord::Result</code> instance
      * @throws SQLException when a database error occurs
      */
     @JRubyMethod(required = 3)
     public IRubyObject execute_prepared_query(final ThreadContext context, final IRubyObject sql,
-        final IRubyObject binds, final IRubyObject cachedStatement) {
+        final IRubyObject binds, final IRubyObject cacheSchema) {
         return withConnection(context, connection -> {
-            final boolean cached = !(cachedStatement == null || cachedStatement.isNil());
-            String query = null;
+            StatementCache.StatementCacheKey cacheKey = null;
             PreparedStatement statement = null;
 
+            boolean canCache = statementCache.isEnabled() && cacheSchema != context.fals;
+            if (canCache) {
+                cacheKey = new StatementCache.StatementCacheKey(sql, cacheSchema);
+                statement = statementCache.get(cacheKey);
+            }
+
+            boolean cached = statement != null;
+            String query = null;
+
             try {
-                if (cached) {
-                    statement = (PreparedStatement) JavaEmbedUtils.rubyToJava(cachedStatement);
-                } else {
+                if (!cached) {
                     query = sql.convertToString().getUnicodeValue();
                     statement = connection.prepareStatement(query);
                     if (fetchSize != 0) statement.setFetchSize(fetchSize);
+                    if (canCache) cached = statementCache.put(cacheKey, statement);
                 }
 
                 setStatementParameters(context, connection, statement, (RubyArray) binds);
@@ -2843,7 +2843,9 @@ public class RubyJdbcConnection extends RubyObject {
     }
 
     private void setConnection(final Connection connection) {
-        close( getConnectionImpl() ); // close previously open connection if there is one
+        Connection prevConnection = getConnectionImpl();
+        if (prevConnection != null) statementCache.clear();
+        close(prevConnection); // close previously open connection if there is one
         dataWrapStruct(connection);
         if ( connection != null ) logDriverUsed(connection);
     }
