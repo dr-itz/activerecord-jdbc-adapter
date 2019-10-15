@@ -34,16 +34,16 @@ import java.util.Map;
 import java.util.Objects;
 
 public class StatementCache {
-    private LinkedHashMap<StatementCacheKey, PreparedStatement> cache;
+    private LinkedHashMap<CacheKey, CacheEntry> cache;
     private boolean enabled;
 
     public StatementCache(int capacity) {
         enabled = capacity > 0;
         if (!enabled) return;
 
-        this.cache = new LinkedHashMap<StatementCacheKey, PreparedStatement>(capacity, 0.75f, true) {
+        this.cache = new LinkedHashMap<CacheKey, CacheEntry>(capacity, 0.75f, true) {
             @Override
-            protected boolean removeEldestEntry(Map.Entry<StatementCacheKey, PreparedStatement> eldest) {
+            protected boolean removeEldestEntry(Map.Entry<CacheKey, CacheEntry> eldest) {
                 boolean remove = size() > capacity;
                 if (remove) {
                     evict(null, eldest.getValue());
@@ -64,23 +64,24 @@ public class StatementCache {
         cache.clear();
     }
 
-    public boolean put(StatementCacheKey key, PreparedStatement value) {
-        if (!enabled) return false;
+    public CacheEntry put(CacheKey key, PreparedStatement statement) {
+        if (!enabled) return null;
 
-        evict(null, cache.put(key, value));
-        return true;
+        CacheEntry newEntry = new CacheEntry(statement);
+        evict(null, cache.put(key, newEntry));
+        return newEntry;
     }
 
-    public PreparedStatement get(StatementCacheKey key) {
+    public CacheEntry get(CacheKey key) {
         if (!enabled) return null;
 
         return cache.get(key);
     }
 
-    static void evict(StatementCacheKey unused, PreparedStatement ps) {
-        if (ps == null) return;
+    static void evict(CacheKey unused, CacheEntry entry) {
+        if (entry == null) return;
         try {
-            ps.close();
+            entry.statement.close();
         } catch (SQLException ignored) { }
     }
 
@@ -94,18 +95,17 @@ public class StatementCache {
             sql = ((RubyArray) key).eltOk(0);
             schema = ((RubyArray) key).eltOk(1);
         }
-        return cache.containsKey(new StatementCacheKey(sql, schema));
+        return cache.containsKey(new CacheKey(sql, schema));
     }
 
     /**
      * A key in the statement cache
      */
-    public static class StatementCacheKey
-    {
-        private ByteList sql;
-        private ByteList schema;
+    public static class CacheKey {
+        private final ByteList sql;
+        private final ByteList schema;
 
-        public StatementCacheKey(IRubyObject sql, IRubyObject schema) {
+        public CacheKey(IRubyObject sql, IRubyObject schema) {
             this.sql = sql.convertToString().getByteList();
             this.schema = schema == null || schema.isNil() ? null : schema.convertToString().getByteList();
         }
@@ -114,7 +114,7 @@ public class StatementCache {
         public boolean equals(Object o) {
             if (this == o) return true;
             if (o == null || getClass() != o.getClass()) return false;
-            StatementCacheKey that = (StatementCacheKey) o;
+            CacheKey that = (CacheKey) o;
             return sql.equals(that.sql) && Objects.equals(schema, that.schema);
         }
 
@@ -127,6 +127,15 @@ public class StatementCache {
         @Override
         public String toString() {
             return sql.toString() + " : " + (schema != null ? schema.toString() : "nil");
+        }
+    }
+
+    public static class CacheEntry {
+        public final PreparedStatement statement;
+        public JdbcResultMeta meta;
+
+        public CacheEntry(PreparedStatement statement) {
+            this.statement = statement;
         }
     }
 }

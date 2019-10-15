@@ -8,6 +8,7 @@ import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Types;
 
+import arjdbc.jdbc.StatementCache;
 import arjdbc.util.PG;
 import org.jruby.Ruby;
 import org.jruby.RubyArray;
@@ -48,15 +49,15 @@ public class PostgreSQLResult extends JdbcResult {
      * @throws SQLException throws!
      */
     static PostgreSQLResult newResult(ThreadContext context,  RubyClass clazz, PostgreSQLRubyJdbcConnection connection,
-                                      ResultSet resultSet, boolean arResult) throws SQLException {
-        return new PostgreSQLResult(context, clazz, connection, resultSet, arResult);
+                                      ResultSet resultSet, StatementCache.CacheEntry cacheEntry, boolean arResult) throws SQLException {
+        return new PostgreSQLResult(context, clazz, connection, resultSet, cacheEntry, arResult);
     }
 
     /********* End JRuby compat methods ***********/
 
     private PostgreSQLResult(ThreadContext context, RubyClass clazz, RubyJdbcConnection connection,
-                             ResultSet resultSet, boolean arResult) throws SQLException {
-        super(context, clazz, connection, resultSet, arResult);
+                             ResultSet resultSet, StatementCache.CacheEntry cacheEntry, boolean arResult) throws SQLException {
+        super(context, clazz, connection, resultSet, cacheEntry, arResult);
     }
 
     protected void setupColumnTypeMap(ThreadContext context, boolean arResult) {

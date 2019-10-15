@@ -28,6 +28,7 @@ package arjdbc.postgresql;
 
 import arjdbc.jdbc.Callable;
 import arjdbc.jdbc.DriverWrapper;
+import arjdbc.jdbc.StatementCache;
 import arjdbc.util.DateTimeUtils;
 import arjdbc.util.PG;
 import arjdbc.util.StringHelper;
@@ -262,7 +263,7 @@ public class PostgreSQLRubyJdbcConnection extends arjdbc.jdbc.RubyJdbcConnection
     @Override
     protected PostgreSQLResult mapExecuteResult(final ThreadContext context, final Connection connection,
                                                 final ResultSet resultSet) throws SQLException {
-        return PostgreSQLResult.newResult(context, resultClass, this, resultSet, false);
+        return PostgreSQLResult.newResult(context, resultClass, this, resultSet, null, false);
     }
 
     /**
@@ -275,8 +276,8 @@ public class PostgreSQLRubyJdbcConnection extends arjdbc.jdbc.RubyJdbcConnection
      */
     @Override
     protected IRubyObject mapQueryResult(final ThreadContext context, final Connection connection,
-                                         final ResultSet resultSet) throws SQLException {
-        return PostgreSQLResult.newResult(context, resultClass, this, resultSet, true).toARResult(context);
+                                         final ResultSet resultSet, StatementCache.CacheEntry cacheEntry) throws SQLException {
+        return PostgreSQLResult.newResult(context, resultClass, this, resultSet, cacheEntry,true).toARResult(context);
     }
 
     @Override

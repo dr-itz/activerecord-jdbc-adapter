@@ -24,23 +24,31 @@ public class JdbcResult extends RubyObject {
 
     protected JdbcResultMeta meta;
 
-    protected JdbcResult(ThreadContext context, RubyClass clazz, RubyJdbcConnection connection, ResultSet resultSet, boolean arResult) throws SQLException {
+    protected JdbcResult(ThreadContext context, RubyClass clazz, RubyJdbcConnection connection, ResultSet resultSet,
+                         StatementCache.CacheEntry cacheEntry, boolean arResult) throws SQLException {
         super(context.runtime, clazz);
 
         values = context.runtime.newArray();
         this.connection = connection;
 
-        this.meta = new JdbcResultMeta();
+        if (cacheEntry != null) this.meta = cacheEntry.meta;
 
-        this.meta.arResult = arResult;
-        setupColumnTypeMap(context, arResult);
+        if (this.meta == null) {
+            this.meta = new JdbcResultMeta();
 
-        final ResultSetMetaData resultMetaData = resultSet.getMetaData();
-        final int columnCount = resultMetaData.getColumnCount();
-        // FIXME: if we support MSSQL we may need to change how we deal with omitting elements
-        meta.columnNames = new RubyString[columnCount];
-        meta.columnTypes = new int[columnCount];
-        extractColumnInfo(context, resultMetaData);
+            this.meta.arResult = arResult;
+            setupColumnTypeMap(context, arResult);
+
+            final ResultSetMetaData resultMetaData = resultSet.getMetaData();
+            final int columnCount = resultMetaData.getColumnCount();
+            // FIXME: if we support MSSQL we may need to change how we deal with omitting elements
+            meta.columnNames = new RubyString[columnCount];
+            meta.columnTypes = new int[columnCount];
+            extractColumnInfo(context, resultMetaData);
+
+            if (cacheEntry != null) cacheEntry.meta = this.meta;
+        }
+
         processResultSet(context, resultSet);
     }
 

@@ -826,7 +826,7 @@ public class RubyJdbcConnection extends RubyObject {
     protected IRubyObject mapExecuteResult(final ThreadContext context,
             final Connection connection, final ResultSet resultSet) throws SQLException{
 
-        return mapQueryResult(context, connection, resultSet);
+        return mapQueryResult(context, connection, resultSet, null);
     }
 
     /**
@@ -1044,7 +1044,7 @@ public class RubyJdbcConnection extends RubyObject {
 
                 // At least until AR 5.1 #exec_query still gets called for things that don't return results in some cases :(
                 if (statement.execute(query)) {
-                    return mapQueryResult(context, connection, statement.getResultSet());
+                    return mapQueryResult(context, connection, statement.getResultSet(), null);
                 }
 
                 return newEmptyResult(context);
@@ -1090,31 +1090,33 @@ public class RubyJdbcConnection extends RubyObject {
     public IRubyObject execute_prepared_query(final ThreadContext context, final IRubyObject sql,
         final IRubyObject binds, final IRubyObject cacheSchema) {
         return withConnection(context, connection -> {
-            StatementCache.StatementCacheKey cacheKey = null;
+            StatementCache.CacheKey cacheKey = null;
+            StatementCache.CacheEntry cacheEntry = null;
             PreparedStatement statement = null;
 
             boolean canCache = statementCache.isEnabled() && cacheSchema != context.fals;
             if (canCache) {
-                cacheKey = new StatementCache.StatementCacheKey(sql, cacheSchema);
-                statement = statementCache.get(cacheKey);
+                cacheKey = new StatementCache.CacheKey(sql, cacheSchema);
+                cacheEntry = statementCache.get(cacheKey);
+                if (cacheEntry != null)
+                    statement = cacheEntry.statement;
             }
 
-            boolean cached = statement != null;
             String query = null;
 
             try {
-                if (!cached) {
+                if (cacheEntry == null) {
                     query = sql.convertToString().getUnicodeValue();
                     statement = connection.prepareStatement(query);
                     if (fetchSize != 0) statement.setFetchSize(fetchSize);
-                    if (canCache) cached = statementCache.put(cacheKey, statement);
+                    if (canCache) cacheEntry = statementCache.put(cacheKey, statement);
                 }
 
                 setStatementParameters(context, connection, statement, (RubyArray) binds);
 
                 if (statement.execute()) {
                     ResultSet resultSet = statement.getResultSet();
-                    IRubyObject results = mapQueryResult(context, connection, resultSet);
+                    IRubyObject results = mapQueryResult(context, connection, resultSet, cacheEntry);
                     resultSet.close();
 
                     return results;
@@ -1126,7 +1128,7 @@ public class RubyJdbcConnection extends RubyObject {
                 debugErrorSQL(context, query);
                 throw e;
             } finally {
-                if ( cached ) {
+                if (cacheEntry != null) {
                     statement.clearParameters();
                 } else {
                     close(statement);
@@ -1135,8 +1137,8 @@ public class RubyJdbcConnection extends RubyObject {
         });
     }
 
-    protected IRubyObject mapQueryResult(final ThreadContext context,
-        final Connection connection, final ResultSet resultSet) throws SQLException {
+    protected IRubyObject mapQueryResult(final ThreadContext context, final Connection connection,
+                                         final ResultSet resultSet, final StatementCache.CacheEntry cacheEntry) throws SQLException {
         final ColumnData[] columns = extractColumns(context, connection, resultSet, false);
         return mapToResult(context, connection, resultSet, columns);
     }
@@ -3080,7 +3082,7 @@ public class RubyJdbcConnection extends RubyObject {
     protected IRubyObject mapGeneratedKeys(final ThreadContext context,
             final Connection connection, final Statement statement) throws SQLException {
         if (supportsGeneratedKeys(connection)) {
-            return mapQueryResult(context, connection, statement.getGeneratedKeys());
+            return mapQueryResult(context, connection, statement.getGeneratedKeys(), null);
         }
         return context.nil; // Adapters should know they don't support it and override this or Adapter#last_inserted_id
     }
