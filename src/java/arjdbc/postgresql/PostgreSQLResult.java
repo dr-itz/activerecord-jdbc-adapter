@@ -60,13 +60,13 @@ public class PostgreSQLResult extends JdbcResult {
     }
 
     protected void setupColumnTypeMap(ThreadContext context, boolean arResult) {
-        this.columnTypeMap = arResult ? RubyHash.newHash(context.runtime) : context.nil;
+        this.meta.columnTypeMap = arResult ? RubyHash.newHash(context.runtime) : context.nil;
     }
 
     protected void addToColumnTypeMap(ThreadContext context, ResultSetMetaData resultSetMetaData, int col) throws SQLException {
-        if (!arResult) return;
+        if (!meta.arResult) return;
 
-        RubyHash types = (RubyHash) columnTypeMap;
+        RubyHash types = (RubyHash) meta.columnTypeMap;
 
         String typeName = resultSetMetaData.getColumnTypeName(col);
 
@@ -82,7 +82,7 @@ public class PostgreSQLResult extends JdbcResult {
         }
 
         final IRubyObject adapter = connection.adapter(context);
-        final RubyString name = columnNames[col - 1];
+        final RubyString name = meta.columnNames[col - 1];
         final IRubyObject type = Helpers.invoke(context, adapter, "get_oid_type",
                 context.runtime.newString(typeName),
                 context.runtime.newFixnum(mod),
