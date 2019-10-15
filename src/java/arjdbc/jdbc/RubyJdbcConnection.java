@@ -655,14 +655,16 @@ public class RubyJdbcConnection extends RubyObject {
 
     @JRubyMethod(name = "disconnect!")
     public synchronized IRubyObject disconnect(final ThreadContext context) {
-        setConnection(null); connected = false;
+        setConnection(null);
+        connected = false;
         return context.nil;
     }
 
     @JRubyMethod(name = "reconnect!")
     public synchronized IRubyObject reconnect(final ThreadContext context) {
         try {
-            connectImpl( ! lazy ); connected = true;
+            connectImpl( ! lazy );
+            connected = true;
         }
         catch (SQLException e) {
             debugStackTrace(context, e);
@@ -2846,7 +2848,7 @@ public class RubyJdbcConnection extends RubyObject {
 
     private void setConnection(final Connection connection) {
         Connection prevConnection = getConnectionImpl();
-        if (prevConnection != null) statementCache.clear();
+        if (prevConnection != null) statementCache.reset();
         close(prevConnection); // close previously open connection if there is one
         dataWrapStruct(connection);
         if ( connection != null ) logDriverUsed(connection);

@@ -36,6 +36,9 @@ import java.util.Objects;
 public class StatementCache {
     private LinkedHashMap<CacheKey, CacheEntry> cache;
     private boolean enabled;
+    private int hits, misses, evitcs;
+
+    private final boolean printStats = Boolean.getBoolean("PRINT_CACHE_STATS");
 
     public StatementCache(int capacity) {
         enabled = capacity > 0;
@@ -47,6 +50,7 @@ public class StatementCache {
                 boolean remove = size() > capacity;
                 if (remove) {
                     evict(null, eldest.getValue());
+                    evitcs++;
                 }
                 return remove;
             }
@@ -64,6 +68,14 @@ public class StatementCache {
         cache.clear();
     }
 
+    public void reset() {
+        clear();
+        if (printStats && hits > 0 && misses > 0) {
+            System.err.println("=> statement cache hits/misses/evicts: " + hits + "/" + misses + "/" + evitcs);
+        }
+        hits = misses = evitcs = 0;
+    }
+
     public CacheEntry put(CacheKey key, PreparedStatement statement) {
         if (!enabled) return null;
 
@@ -75,7 +87,13 @@ public class StatementCache {
     public CacheEntry get(CacheKey key) {
         if (!enabled) return null;
 
-        return cache.get(key);
+        CacheEntry entry = cache.get(key);
+        if (entry != null) {
+            hits++;
+        } else {
+            misses++;
+        }
+        return entry;
     }
 
     static void evict(CacheKey unused, CacheEntry entry) {
