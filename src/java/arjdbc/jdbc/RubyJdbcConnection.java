@@ -847,7 +847,7 @@ public class RubyJdbcConnection extends RubyObject {
 
                 statement = createStatement(context, connection);
                 statement.executeUpdate(query, Statement.RETURN_GENERATED_KEYS);
-                return mapGeneratedKeys(context, connection, statement);
+                return mapGeneratedKeys(context, connection, statement, null);
 
             } catch (final SQLException e) {
                 debugErrorSQL(context, query);
@@ -869,20 +869,37 @@ public class RubyJdbcConnection extends RubyObject {
     @JRubyMethod(name = "execute_insert", required = 2)
     public IRubyObject execute_insert(final ThreadContext context, final IRubyObject sql, final IRubyObject binds) {
         return withConnection(context, connection -> {
+            StatementCache.CacheKey cacheKey = null;
+            StatementCache.CacheEntry cacheEntry = null;
             PreparedStatement statement = null;
-            final String query = sqlString(sql);
-            try {
 
-                statement = connection.prepareStatement(query, Statement.RETURN_GENERATED_KEYS);
+            if (statementCache.isEnabled()) {
+                cacheKey = new StatementCache.CacheKey(sql, getCacheSchema(context));
+                cacheEntry = statementCache.get(cacheKey);
+                if (cacheEntry != null) statement = cacheEntry.statement;
+            }
+
+            String query = null;
+            try {
+                if (cacheEntry == null) {
+                    query = sql.convertToString().getUnicodeValue();
+                    statement = connection.prepareStatement(query, Statement.RETURN_GENERATED_KEYS);
+                    cacheEntry = statementCache.put(cacheKey, statement);
+                }
+
                 setStatementParameters(context, connection, statement, (RubyArray) binds);
                 statement.executeUpdate();
-                return mapGeneratedKeys(context, connection, statement);
+                return mapGeneratedKeys(context, connection, statement, cacheEntry);
 
             } catch (final SQLException e) {
                 debugErrorSQL(context, query);
                 throw e;
             } finally {
-                close(statement);
+                if (cacheEntry != null) {
+                    statement.clearParameters();
+                } else {
+                    close(statement);
+                }
             }
         });
     }
@@ -1104,8 +1121,7 @@ public class RubyJdbcConnection extends RubyObject {
             if (canCache) {
                 cacheKey = new StatementCache.CacheKey(sql, getCacheSchema(context));
                 cacheEntry = statementCache.get(cacheKey);
-                if (cacheEntry != null)
-                    statement = cacheEntry.statement;
+                if (cacheEntry != null) statement = cacheEntry.statement;
             }
 
             String query = null;
@@ -1115,7 +1131,7 @@ public class RubyJdbcConnection extends RubyObject {
                     query = sql.convertToString().getUnicodeValue();
                     statement = connection.prepareStatement(query);
                     if (fetchSize != 0) statement.setFetchSize(fetchSize);
-                    if (canCache) cacheEntry = statementCache.put(cacheKey, statement);
+                    cacheEntry = statementCache.put(cacheKey, statement);
                 }
 
                 setStatementParameters(context, connection, statement, (RubyArray) binds);
@@ -3089,10 +3105,10 @@ public class RubyJdbcConnection extends RubyObject {
         }
     }
 
-    protected IRubyObject mapGeneratedKeys(final ThreadContext context,
-            final Connection connection, final Statement statement) throws SQLException {
+    protected IRubyObject mapGeneratedKeys(final ThreadContext context, final Connection connection,
+                                           final Statement statement, StatementCache.CacheEntry cacheEntry) throws SQLException {
         if (supportsGeneratedKeys(connection)) {
-            return mapQueryResult(context, connection, statement.getGeneratedKeys(), null);
+            return mapQueryResult(context, connection, statement.getGeneratedKeys(), cacheEntry);
         }
         return context.nil; // Adapters should know they don't support it and override this or Adapter#last_inserted_id
     }
