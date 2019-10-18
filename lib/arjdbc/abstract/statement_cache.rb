@@ -26,10 +26,6 @@ module ArJdbc
 
       # This should be overridden by the adapter if the sql itself
       # is not enough to make the key unique
-      def sql_cache_schema
-        nil
-      end
-
       # for testing only
       def sql_key(sql)
         [ sql, nil ]

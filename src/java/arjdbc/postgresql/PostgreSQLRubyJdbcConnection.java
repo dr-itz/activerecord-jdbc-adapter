@@ -230,6 +230,10 @@ public class PostgreSQLRubyJdbcConnection extends arjdbc.jdbc.RubyJdbcConnection
         return oidArray = ((RubyModule) PostgreSQL.getConstantAt("OID")).getClass("Array");
     }
 
+    @Override
+    protected IRubyObject getCacheSchema(final ThreadContext context) {
+        return getAdapter().callMethod(context,"schema_search_path");
+    }
 
     @Override
     protected Connection newConnection() throws RaiseException, SQLException {

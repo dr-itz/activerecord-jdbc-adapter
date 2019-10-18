@@ -42,7 +42,7 @@ module ArJdbc
           log(sql, name) { @connection.execute_query(sql) }
         else
           log(sql, name, binds) do
-            @connection.execute_prepared_query(sql, binds, prepare ? sql_cache_schema : false)
+            @connection.execute_prepared_query(sql, binds, prepare)
           end
         end
       end

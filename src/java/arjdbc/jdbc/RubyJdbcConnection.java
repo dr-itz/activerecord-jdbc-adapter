@@ -1072,6 +1072,10 @@ public class RubyJdbcConnection extends RubyObject {
         statementCache.clear();
     }
 
+    protected IRubyObject getCacheSchema(final ThreadContext context) {
+        return null;
+    }
+
     // Called from exec_query in abstract/database_statements
     /**
      * Executes a query and returns the (AR) result.  There are three parameters:
@@ -1084,21 +1088,21 @@ public class RubyJdbcConnection extends RubyObject {
      * @param context which context this method is executing on.
      * @param sql the query to execute.
      * @param binds an array of values to be set as parameters
-     * @param cacheSchema additional key for caching
+     * @param allowCache allow caching
      * @return a Ruby <code>ActiveRecord::Result</code> instance
      * @throws SQLException when a database error occurs
      */
     @JRubyMethod(required = 3)
     public IRubyObject execute_prepared_query(final ThreadContext context, final IRubyObject sql,
-        final IRubyObject binds, final IRubyObject cacheSchema) {
+        final IRubyObject binds, final IRubyObject allowCache) {
         return withConnection(context, connection -> {
             StatementCache.CacheKey cacheKey = null;
             StatementCache.CacheEntry cacheEntry = null;
             PreparedStatement statement = null;
 
-            boolean canCache = statementCache.isEnabled() && cacheSchema != context.fals;
+            boolean canCache = statementCache.isEnabled() && allowCache != context.fals;
             if (canCache) {
-                cacheKey = new StatementCache.CacheKey(sql, cacheSchema);
+                cacheKey = new StatementCache.CacheKey(sql, getCacheSchema(context));
                 cacheEntry = statementCache.get(cacheKey);
                 if (cacheEntry != null)
                     statement = cacheEntry.statement;
@@ -2514,6 +2518,10 @@ public class RubyJdbcConnection extends RubyObject {
 
         if (value instanceof RubyTime) {
             return "timestamp";
+        }
+
+        if (value instanceof RubyDate) {
+            return "date";
         }
 
         if (value instanceof RubyBoolean) {

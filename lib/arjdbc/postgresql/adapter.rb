@@ -706,10 +706,6 @@ module ActiveRecord::ConnectionAdapters
 
     # Prepared statements aren't schema aware so we need to make sure we
     # store different PreparedStatement objects for different schemas
-    def sql_cache_schema
-      schema_search_path
-    end
-
     # for testing only
     def sql_key(sql)
       [ sql, schema_search_path ]
