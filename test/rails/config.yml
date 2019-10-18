@@ -81,8 +81,6 @@ connections:
       username: <%= ENV['PGUSER'] || ENV['user'] || 'rails' %>
       jdbc_fetch_size: 100
       properties:
-        # Postgres' JDBC driver does not prepare statements until executed 5 times by default, let's lower:
-        prepareThreshold: <%= ENV['PREPARE_THRESHOLD'] || 1 %>
         # to not print (lengthy) traces from driver such as :
         #   SEVERE: Connection error: org.postgresql.util.PSQLException: FATAL: database "xxx" does not exist
         #loggerLevel: OFF # Broken in 42.1.4 thus let's do it manually :
