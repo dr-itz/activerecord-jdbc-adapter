@@ -882,7 +882,7 @@ public class RubyJdbcConnection extends RubyObject {
             String query = null;
             try {
                 if (cacheEntry == null) {
-                    query = sql.convertToString().getUnicodeValue();
+                    query = sqlString(sql);
                     statement = connection.prepareStatement(query, Statement.RETURN_GENERATED_KEYS);
                     cacheEntry = statementCache.put(cacheKey, statement);
                 }
@@ -892,14 +892,11 @@ public class RubyJdbcConnection extends RubyObject {
                 return mapGeneratedKeys(context, connection, statement, cacheEntry);
 
             } catch (final SQLException e) {
+                if (query == null) query = sqlString(sql);
                 debugErrorSQL(context, query);
                 throw e;
             } finally {
-                if (cacheEntry != null) {
-                    statement.clearParameters();
-                } else {
-                    close(statement);
-                }
+                close(statement, cacheEntry);
             }
         });
     }
@@ -943,18 +940,34 @@ public class RubyJdbcConnection extends RubyObject {
     @JRubyMethod(name = {"execute_prepared_update", "execute_prepared_delete"}, required = 2)
     public IRubyObject execute_prepared_update(final ThreadContext context, final IRubyObject sql, final IRubyObject binds) {
         return withConnection(context, (Callable<IRubyObject>) connection -> {
+            StatementCache.CacheKey cacheKey = null;
+            StatementCache.CacheEntry cacheEntry = null;
             PreparedStatement statement = null;
-            final String query = sqlString(sql);
+
+            if (statementCache.isEnabled()) {
+                cacheKey = new StatementCache.CacheKey(sql, getCacheSchema(context));
+                cacheEntry = statementCache.get(cacheKey);
+                if (cacheEntry != null) statement = cacheEntry.statement;
+            }
+
+            String query = null;
             try {
-                statement = connection.prepareStatement(query);
+                if (cacheEntry == null) {
+                    query = sqlString(sql);
+                    statement = connection.prepareStatement(query, Statement.RETURN_GENERATED_KEYS);
+                    cacheEntry = statementCache.put(cacheKey, statement);
+                }
+
                 setStatementParameters(context, connection, statement, (RubyArray) binds);
                 final int rowCount = statement.executeUpdate();
                 return context.runtime.newFixnum(rowCount);
+
             } catch (final SQLException e) {
+                if (query == null) query = sqlString(sql);
                 debugErrorSQL(context, query);
                 throw e;
             } finally {
-                close(statement);
+                close(statement, cacheEntry);
             }
         });
     }
@@ -1128,7 +1141,7 @@ public class RubyJdbcConnection extends RubyObject {
 
             try {
                 if (cacheEntry == null) {
-                    query = sql.convertToString().getUnicodeValue();
+                    query = sqlString(sql);
                     statement = connection.prepareStatement(query);
                     if (fetchSize != 0) statement.setFetchSize(fetchSize);
                     cacheEntry = statementCache.put(cacheKey, statement);
@@ -1146,15 +1159,11 @@ public class RubyJdbcConnection extends RubyObject {
                     return newEmptyResult(context);
                 }
             } catch (final SQLException e) {
-                if (query == null) query = sql.convertToString().getUnicodeValue();
+                if (query == null) query = sqlString(sql);
                 debugErrorSQL(context, query);
                 throw e;
             } finally {
-                if (cacheEntry != null) {
-                    statement.clearParameters();
-                } else {
-                    close(statement);
-                }
+                close(statement, cacheEntry);
             }
         });
     }
@@ -3699,6 +3708,17 @@ public class RubyJdbcConnection extends RubyObject {
             try { statement.close(); }
             catch (final Exception e) { /* NOOP */ }
         }
+    }
+
+    protected static void close(final PreparedStatement statement, StatementCache.CacheEntry cacheEntry) {
+        if (statement == null) return;
+        try {
+            if (cacheEntry != null) {
+                statement.clearParameters();
+            } else {
+                statement.close();
+            }
+        } catch (final SQLException ignored) {}
     }
 
     // DEBUG-ing helpers :
