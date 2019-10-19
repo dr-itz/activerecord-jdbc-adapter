@@ -138,8 +138,7 @@ public class StatementCache {
 
         @Override
         public int hashCode() {
-            int hash = sql.hashCode();
-            return schema == null ? hash : hash * 31 + schema.hashCode();
+            return sql.hashCode();
         }
 
         @Override
