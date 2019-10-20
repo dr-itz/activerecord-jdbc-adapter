@@ -753,48 +753,50 @@ public class RubyJdbcConnection extends RubyObject {
 
     @JRubyMethod(name = "execute", required = 1)
     public IRubyObject execute(final ThreadContext context, final IRubyObject sql) {
+        return withConnection(context, connection -> execute(context, connection, sql));
+    }
+
+    protected IRubyObject execute(final ThreadContext context, final Connection connection, final IRubyObject sql) throws SQLException {
         final String query = sqlString(sql);
-        return withConnection(context, connection -> {
-            Statement statement = null;
-            try {
-                statement = createStatement(context, connection);
+        Statement statement = null;
+        try {
+            statement = createStatement(context, connection);
 
-                // For DBs that do support multiple statements, lets return the last result set
-                // to be consistent with AR
-                boolean hasResultSet = doExecute(statement, query);
-                int updateCount = statement.getUpdateCount();
+            // For DBs that do support multiple statements, lets return the last result set
+            // to be consistent with AR
+            boolean hasResultSet = doExecute(statement, query);
+            int updateCount = statement.getUpdateCount();
 
-                IRubyObject result = context.nil; // If no results, return nil
-                ResultSet resultSet;
+            IRubyObject result = context.nil; // If no results, return nil
+            ResultSet resultSet;
 
-                while (hasResultSet || updateCount != -1) {
+            while (hasResultSet || updateCount != -1) {
 
-                    if (hasResultSet) {
-                        resultSet = statement.getResultSet();
+                if (hasResultSet) {
+                    resultSet = statement.getResultSet();
 
-                        // Unfortunately the result set gets closed when getMoreResults()
-                        // is called, so we have to process the result sets as we get them
-                        // this shouldn't be an issue in most cases since we're only getting 1 result set anyways
-                        result = mapExecuteResult(context, connection, resultSet);
-                        resultSet.close();
-                    } else {
-                        result = context.runtime.newFixnum(updateCount);
-                    }
-
-                    // Check to see if there is another result set
-                    hasResultSet = statement.getMoreResults();
-                    updateCount = statement.getUpdateCount();
+                    // Unfortunately the result set gets closed when getMoreResults()
+                    // is called, so we have to process the result sets as we get them
+                    // this shouldn't be an issue in most cases since we're only getting 1 result set anyways
+                    result = mapExecuteResult(context, connection, resultSet);
+                    resultSet.close();
+                } else {
+                    result = context.runtime.newFixnum(updateCount);
                 }
 
-                return result;
-
-            } catch (final SQLException e) {
-                debugErrorSQL(context, query);
-                throw e;
-            } finally {
-                close(statement);
+                // Check to see if there is another result set
+                hasResultSet = statement.getMoreResults();
+                updateCount = statement.getUpdateCount();
             }
-        });
+
+            return result;
+
+        } catch (final SQLException e) {
+            debugErrorSQL(context, query);
+            throw e;
+        } finally {
+            close(statement);
+        }
     }
 
     protected Statement createStatement(final ThreadContext context, final Connection connection)
@@ -840,22 +842,22 @@ public class RubyJdbcConnection extends RubyObject {
      */
     @JRubyMethod(name = "execute_insert", required = 1)
     public IRubyObject execute_insert(final ThreadContext context, final IRubyObject sql) {
-        return withConnection(context, connection -> {
-            Statement statement = null;
-            final String query = sqlString(sql);
-            try {
+        return withConnection(context, connection -> execute_insert(context, connection, sql));
+    }
 
-                statement = createStatement(context, connection);
-                statement.executeUpdate(query, Statement.RETURN_GENERATED_KEYS);
-                return mapGeneratedKeys(context, connection, statement, null);
-
-            } catch (final SQLException e) {
-                debugErrorSQL(context, query);
-                throw e;
-            } finally {
-                close(statement);
-            }
-        });
+    protected IRubyObject execute_insert(final ThreadContext context, final Connection connection, final IRubyObject sql) throws SQLException {
+        Statement statement = null;
+        final String query = sqlString(sql);
+        try {
+            statement = createStatement(context, connection);
+            statement.executeUpdate(query, Statement.RETURN_GENERATED_KEYS);
+            return mapGeneratedKeys(context, connection, statement, null);
+        } catch (final SQLException e) {
+            debugErrorSQL(context, query);
+            throw e;
+        } finally {
+            close(statement);
+        }
     }
 
     /**
@@ -868,37 +870,40 @@ public class RubyJdbcConnection extends RubyObject {
      */
     @JRubyMethod(name = "execute_insert", required = 2)
     public IRubyObject execute_insert(final ThreadContext context, final IRubyObject sql, final IRubyObject binds) {
-        return withConnection(context, connection -> {
-            StatementCache.CacheKey cacheKey = null;
-            StatementCache.CacheEntry cacheEntry = null;
-            PreparedStatement statement = null;
+        return withConnection(context, connection -> execute_insert(context, connection, sql, binds));
+    }
 
-            if (statementCache.isEnabled()) {
-                cacheKey = new StatementCache.CacheKey(sql, getCacheSchema(context));
-                cacheEntry = statementCache.get(cacheKey);
-                if (cacheEntry != null) statement = cacheEntry.statement;
+    protected IRubyObject execute_insert(final ThreadContext context, final Connection connection,
+                                         final IRubyObject sql, final IRubyObject binds) throws SQLException {
+        StatementCache.CacheKey cacheKey = null;
+        StatementCache.CacheEntry cacheEntry = null;
+        PreparedStatement statement = null;
+
+        if (statementCache.isEnabled()) {
+            cacheKey = new StatementCache.CacheKey(sql, getCacheSchema(context));
+            cacheEntry = statementCache.get(cacheKey);
+            if (cacheEntry != null) statement = cacheEntry.statement;
+        }
+
+        String query = null;
+        try {
+            if (cacheEntry == null) {
+                query = sqlString(sql);
+                statement = connection.prepareStatement(query, Statement.RETURN_GENERATED_KEYS);
+                cacheEntry = statementCache.put(cacheKey, statement);
             }
 
-            String query = null;
-            try {
-                if (cacheEntry == null) {
-                    query = sqlString(sql);
-                    statement = connection.prepareStatement(query, Statement.RETURN_GENERATED_KEYS);
-                    cacheEntry = statementCache.put(cacheKey, statement);
-                }
+            setStatementParameters(context, connection, statement, (RubyArray) binds);
+            statement.executeUpdate();
+            return mapGeneratedKeys(context, connection, statement, cacheEntry);
 
-                setStatementParameters(context, connection, statement, (RubyArray) binds);
-                statement.executeUpdate();
-                return mapGeneratedKeys(context, connection, statement, cacheEntry);
-
-            } catch (final SQLException e) {
-                if (query == null) query = sqlString(sql);
-                debugErrorSQL(context, query);
-                throw e;
-            } finally {
-                close(statement, cacheEntry);
-            }
-        });
+        } catch (final SQLException e) {
+            if (query == null) query = sqlString(sql);
+            debugErrorSQL(context, query);
+            throw e;
+        } finally {
+            close(statement, cacheEntry);
+        }
     }
 
     /**
@@ -910,22 +915,23 @@ public class RubyJdbcConnection extends RubyObject {
      */
     @JRubyMethod(name = {"execute_update", "execute_delete"}, required = 1)
     public IRubyObject execute_update(final ThreadContext context, final IRubyObject sql) {
-        return withConnection(context, (Callable<IRubyObject>) connection -> {
-            Statement statement = null;
-            final String query = sqlString(sql);
+        return withConnection(context, connection -> execute_update(context, connection, sql));
+    }
 
-            try {
-                statement = createStatement(context, connection);
+    protected IRubyObject execute_update(final ThreadContext context, final Connection connection, final IRubyObject sql) throws SQLException {
+        Statement statement = null;
+        final String query = sqlString(sql);
+        try {
+            statement = createStatement(context, connection);
 
-                final int rowCount = statement.executeUpdate(query);
-                return context.runtime.newFixnum(rowCount);
-            } catch (final SQLException e) {
-                debugErrorSQL(context, query);
-                throw e;
-            } finally {
-                close(statement);
-            }
-        });
+            final int rowCount = statement.executeUpdate(query);
+            return context.runtime.newFixnum(rowCount);
+        } catch (final SQLException e) {
+            debugErrorSQL(context, query);
+            throw e;
+        } finally {
+            close(statement);
+        }
     }
 
     /**
@@ -939,37 +945,40 @@ public class RubyJdbcConnection extends RubyObject {
      */
     @JRubyMethod(name = {"execute_prepared_update", "execute_prepared_delete"}, required = 2)
     public IRubyObject execute_prepared_update(final ThreadContext context, final IRubyObject sql, final IRubyObject binds) {
-        return withConnection(context, (Callable<IRubyObject>) connection -> {
-            StatementCache.CacheKey cacheKey = null;
-            StatementCache.CacheEntry cacheEntry = null;
-            PreparedStatement statement = null;
+        return withConnection(context, connection -> execute_prepared_update(context, connection, sql, binds));
+    }
 
-            if (statementCache.isEnabled()) {
-                cacheKey = new StatementCache.CacheKey(sql, getCacheSchema(context));
-                cacheEntry = statementCache.get(cacheKey);
-                if (cacheEntry != null) statement = cacheEntry.statement;
+    protected IRubyObject execute_prepared_update(final ThreadContext context, final Connection connection,
+                                                  final IRubyObject sql, final IRubyObject binds) throws SQLException {
+        StatementCache.CacheKey cacheKey = null;
+        StatementCache.CacheEntry cacheEntry = null;
+        PreparedStatement statement = null;
+
+        if (statementCache.isEnabled()) {
+            cacheKey = new StatementCache.CacheKey(sql, getCacheSchema(context));
+            cacheEntry = statementCache.get(cacheKey);
+            if (cacheEntry != null) statement = cacheEntry.statement;
+        }
+
+        String query = null;
+        try {
+            if (cacheEntry == null) {
+                query = sqlString(sql);
+                statement = connection.prepareStatement(query, Statement.RETURN_GENERATED_KEYS);
+                cacheEntry = statementCache.put(cacheKey, statement);
             }
 
-            String query = null;
-            try {
-                if (cacheEntry == null) {
-                    query = sqlString(sql);
-                    statement = connection.prepareStatement(query, Statement.RETURN_GENERATED_KEYS);
-                    cacheEntry = statementCache.put(cacheKey, statement);
-                }
+            setStatementParameters(context, connection, statement, (RubyArray) binds);
+            final int rowCount = statement.executeUpdate();
+            return context.runtime.newFixnum(rowCount);
 
-                setStatementParameters(context, connection, statement, (RubyArray) binds);
-                final int rowCount = statement.executeUpdate();
-                return context.runtime.newFixnum(rowCount);
-
-            } catch (final SQLException e) {
-                if (query == null) query = sqlString(sql);
-                debugErrorSQL(context, query);
-                throw e;
-            } finally {
-                close(statement, cacheEntry);
-            }
-        });
+        } catch (final SQLException e) {
+            if (query == null) query = sqlString(sql);
+            debugErrorSQL(context, query);
+            throw e;
+        } finally {
+            close(statement, cacheEntry);
+        }
     }
 
     /**
@@ -1009,49 +1018,49 @@ public class RubyJdbcConnection extends RubyObject {
                 break;
         }
 
-        return doExecuteQueryRaw(context, query, maxRows, block, binds);
+        return withConnection(context, connection -> doExecuteQueryRaw(context, connection, query, maxRows, block, binds));
     }
 
-    private IRubyObject doExecuteQueryRaw(final ThreadContext context,
-        final String query, final int maxRows, final Block block, final RubyArray binds) {
-        return withConnection(context, connection -> {
-            Statement statement = null; boolean hasResult;
-            try {
-                if ( binds == null || binds.isEmpty()) { // plain statement
-                    statement = createStatement(context, connection);
-                    statement.setMaxRows(maxRows); // zero means there is no limit
-                    hasResult = statement.execute(query);
-                }
-                else {
-                    final PreparedStatement prepStatement;
-                    statement = prepStatement = connection.prepareStatement(query);
-                    if (fetchSize != 0) statement.setFetchSize(fetchSize);
-                    statement.setMaxRows(maxRows); // zero means there is no limit
-                    setStatementParameters(context, connection, prepStatement, binds);
-                    hasResult = prepStatement.execute();
-                }
+    private IRubyObject doExecuteQueryRaw(final ThreadContext context, final Connection connection,
+        final String query, final int maxRows, final Block block, final RubyArray binds) throws SQLException {
 
-                if (block.isGiven()) {
-                    if (hasResult) {
-                        // yield(id1, name1) ... row 1 result data
-                        // yield(id2, name2) ... row 2 result data
-                        return yieldResultRows(context, connection, statement.getResultSet(), block);
-                    }
-                    return context.nil;
-                }
+        Statement statement = null;
+        boolean hasResult;
+        try {
+            if ( binds == null || binds.isEmpty()) { // plain statement
+                statement = createStatement(context, connection);
+                statement.setMaxRows(maxRows); // zero means there is no limit
+                hasResult = statement.execute(query);
+            }
+            else {
+                final PreparedStatement prepStatement;
+                statement = prepStatement = connection.prepareStatement(query);
+                if (fetchSize != 0) statement.setFetchSize(fetchSize);
+                statement.setMaxRows(maxRows); // zero means there is no limit
+                setStatementParameters(context, connection, prepStatement, binds);
+                hasResult = prepStatement.execute();
+            }
+
+            if (block.isGiven()) {
                 if (hasResult) {
-                    return mapToRawResult(context, connection, statement.getResultSet(), false);
+                    // yield(id1, name1) ... row 1 result data
+                    // yield(id2, name2) ... row 2 result data
+                    return yieldResultRows(context, connection, statement.getResultSet(), block);
                 }
-                return context.runtime.newEmptyArray();
+                return context.nil;
             }
-            catch (final SQLException e) {
-                debugErrorSQL(context, query);
-                throw e;
+            if (hasResult) {
+                return mapToRawResult(context, connection, statement.getResultSet(), false);
             }
-            finally {
-                close(statement);
-            }
-        });
+            return context.runtime.newEmptyArray();
+        }
+        catch (final SQLException e) {
+            debugErrorSQL(context, query);
+            throw e;
+        }
+        finally {
+            close(statement);
+        }
     }
 
     protected static String sqlString(final IRubyObject sql) {
@@ -1068,26 +1077,28 @@ public class RubyJdbcConnection extends RubyObject {
      */
     @JRubyMethod(required = 1)
     public IRubyObject execute_query(final ThreadContext context, final IRubyObject sql) {
-        return withConnection(context, connection -> {
-            Statement statement = null;
-            final String query = sqlString(sql);
-            try {
-                statement = createStatement(context, connection);
+        return withConnection(context, connection -> execute_query(context, connection, sql));
+    }
 
-                // At least until AR 5.1 #exec_query still gets called for things that don't return results in some cases :(
-                if (statement.execute(query)) {
-                    return mapQueryResult(context, connection, statement.getResultSet(), null);
-                }
+    protected IRubyObject execute_query(final ThreadContext context, final Connection connection, final IRubyObject sql) throws  SQLException {
+        Statement statement = null;
+        final String query = sqlString(sql);
+        try {
+            statement = createStatement(context, connection);
 
-                return newEmptyResult(context);
-
-            } catch (final SQLException e) {
-                debugErrorSQL(context, query);
-                throw e;
-            } finally {
-                close(statement);
+            // At least until AR 5.1 #exec_query still gets called for things that don't return results in some cases :(
+            if (statement.execute(query)) {
+                return mapQueryResult(context, connection, statement.getResultSet(), null);
             }
-        });
+
+            return newEmptyResult(context);
+
+        } catch (final SQLException e) {
+            debugErrorSQL(context, query);
+            throw e;
+        } finally {
+            close(statement);
+        }
     }
 
     @JRubyMethod(required = 1)
@@ -1125,47 +1136,51 @@ public class RubyJdbcConnection extends RubyObject {
     @JRubyMethod(required = 3)
     public IRubyObject execute_prepared_query(final ThreadContext context, final IRubyObject sql,
         final IRubyObject binds, final IRubyObject allowCache) {
-        return withConnection(context, connection -> {
-            StatementCache.CacheKey cacheKey = null;
-            StatementCache.CacheEntry cacheEntry = null;
-            PreparedStatement statement = null;
+        return withConnection(context, connection -> execute_prepared_query(context, connection, sql, binds, allowCache));
+    }
 
-            boolean canCache = statementCache.isEnabled() && allowCache != context.fals;
-            if (canCache) {
-                cacheKey = new StatementCache.CacheKey(sql, getCacheSchema(context));
-                cacheEntry = statementCache.get(cacheKey);
-                if (cacheEntry != null) statement = cacheEntry.statement;
+    protected IRubyObject execute_prepared_query(final ThreadContext context, final Connection connection,
+                                                 final IRubyObject sql, final IRubyObject binds,
+                                                 final IRubyObject allowCache) throws SQLException {
+        StatementCache.CacheKey cacheKey = null;
+        StatementCache.CacheEntry cacheEntry = null;
+        PreparedStatement statement = null;
+
+        boolean canCache = statementCache.isEnabled() && allowCache != context.fals;
+        if (canCache) {
+            cacheKey = new StatementCache.CacheKey(sql, getCacheSchema(context));
+            cacheEntry = statementCache.get(cacheKey);
+            if (cacheEntry != null) statement = cacheEntry.statement;
+        }
+
+        String query = null;
+
+        try {
+            if (cacheEntry == null) {
+                query = sqlString(sql);
+                statement = connection.prepareStatement(query);
+                if (fetchSize != 0) statement.setFetchSize(fetchSize);
+                cacheEntry = statementCache.put(cacheKey, statement);
             }
 
-            String query = null;
+            setStatementParameters(context, connection, statement, (RubyArray) binds);
 
-            try {
-                if (cacheEntry == null) {
-                    query = sqlString(sql);
-                    statement = connection.prepareStatement(query);
-                    if (fetchSize != 0) statement.setFetchSize(fetchSize);
-                    cacheEntry = statementCache.put(cacheKey, statement);
-                }
+            if (statement.execute()) {
+                ResultSet resultSet = statement.getResultSet();
+                IRubyObject results = mapQueryResult(context, connection, resultSet, cacheEntry);
+                resultSet.close();
 
-                setStatementParameters(context, connection, statement, (RubyArray) binds);
-
-                if (statement.execute()) {
-                    ResultSet resultSet = statement.getResultSet();
-                    IRubyObject results = mapQueryResult(context, connection, resultSet, cacheEntry);
-                    resultSet.close();
-
-                    return results;
-                } else {
-                    return newEmptyResult(context);
-                }
-            } catch (final SQLException e) {
-                if (query == null) query = sqlString(sql);
-                debugErrorSQL(context, query);
-                throw e;
-            } finally {
-                close(statement, cacheEntry);
+                return results;
+            } else {
+                return newEmptyResult(context);
             }
-        });
+        } catch (final SQLException e) {
+            if (query == null) query = sqlString(sql);
+            debugErrorSQL(context, query);
+            throw e;
+        } finally {
+            close(statement, cacheEntry);
+        }
     }
 
     protected IRubyObject mapQueryResult(final ThreadContext context, final Connection connection,
@@ -3256,10 +3271,11 @@ public class RubyJdbcConnection extends RubyObject {
 
     private <T> T withConnection(final ThreadContext context, final boolean handleException,
                                  final Callable<T> block) throws RaiseException, SQLException {
-
-        Exception exception; int retry = 0; int i = 0;
-
-        boolean reconnectOnRetry = true; boolean gotConnection = false;
+        Exception exception;
+        int retry = 0;
+        int i = 0;
+        boolean reconnectOnRetry = true;
+        boolean gotConnection = false;
         do {
             boolean autoCommit = true; // retry in-case getAutoCommit throws
             try {
